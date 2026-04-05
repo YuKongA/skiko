@@ -9,6 +9,12 @@ abstract class WriteCInteropDefFile : DefaultTask() {
     @get:Input
     abstract val linkerOpts: ListProperty<String>
 
+    @get:Input
+    abstract val staticLibraries: ListProperty<String>
+
+    @get:Input
+    abstract val libraryPaths: ListProperty<String>
+
     @get:OutputFile
     abstract val outputFile: RegularFileProperty
 
@@ -21,6 +27,14 @@ abstract class WriteCInteropDefFile : DefaultTask() {
             val linkerOpts = linkerOpts.get()
             if (linkerOpts.isNotEmpty()) {
                 writer.appendLine("linkerOpts=${linkerOpts.joinToString(" ")}")
+            }
+            val staticLibs = staticLibraries.get()
+            if (staticLibs.isNotEmpty()) {
+                writer.appendLine("staticLibraries=${staticLibs.joinToString(" ")}")
+            }
+            val libPaths = libraryPaths.get()
+            if (libPaths.isNotEmpty()) {
+                writer.appendLine("libraryPaths=${libPaths.joinToString(" ") { it.replace("\\", "/") }}")
             }
         }
     }

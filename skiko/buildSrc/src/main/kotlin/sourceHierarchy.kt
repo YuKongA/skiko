@@ -36,6 +36,10 @@ val skikoSourceSetHierarchyTemplate = KotlinHierarchyTemplate {
                 withLinux()
             }
 
+            group("mingw") {
+                withMingwX64()
+            }
+
             group("darwin") {
                 group("uikit") {
                     group("tvos")

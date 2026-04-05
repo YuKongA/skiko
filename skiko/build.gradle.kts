@@ -173,6 +173,9 @@ kotlin {
     if (supportNativeTvosX64) {
         skikoProjectContext.configureNativeTarget(OS.TVOS, Arch.X64, tvosX64())
     }
+    if (supportNativeWindows) {
+        skikoProjectContext.configureNativeTarget(OS.Windows, Arch.X64, mingwX64())
+    }
 
     sourceSets.commonMain.dependencies {
         implementation(kotlin("stdlib"))

@@ -65,7 +65,7 @@ fun skiaHeadersDirs(skiaDir: File): List<File> =
 fun includeHeadersFlags(headersDirs: List<File>) =
     headersDirs.map { "-I${it.absolutePath}" }.toTypedArray()
 
-fun skiaPreprocessorFlags(os: OS, buildType: SkiaBuildType): Array<String> {
+fun skiaPreprocessorFlags(os: OS, buildType: SkiaBuildType, isNative: Boolean = false): Array<String> {
     val base = listOf(
         "-DSK_ALLOW_STATIC_GLOBAL_INITIALIZERS=1",
         "-DSK_FORCE_DISTANCE_FIELD_TEXT=0",
@@ -109,16 +109,22 @@ fun skiaPreprocessorFlags(os: OS, buildType: SkiaBuildType): Array<String> {
             "-DSK_SHAPER_CORETEXT_AVAILABLE",
             "-DSK_METAL"
         )
-        OS.Windows -> listOf(
-            "-DSK_BUILD_FOR_WIN",
-            "-D_CRT_SECURE_NO_WARNINGS",
-            "-D_HAS_EXCEPTIONS=0",
-            "-DWIN32_LEAN_AND_MEAN",
-            "-DNOMINMAX",
-            "-DSK_GAMMA_APPLY_TO_A8",
-            "-DSK_DIRECT3D",
-            "-DSK_ANGLE"
-        )
+        OS.Windows -> {
+            val flags = mutableListOf(
+                "-DSK_BUILD_FOR_WIN",
+                "-D_CRT_SECURE_NO_WARNINGS",
+                "-D_HAS_EXCEPTIONS=0",
+                "-DWIN32_LEAN_AND_MEAN",
+                "-DNOMINMAX",
+                "-DSK_GAMMA_APPLY_TO_A8",
+            )
+            if (!isNative) {
+                // D3D/ANGLE are only used in JVM (MSVC) builds, not in native (MinGW) builds
+                flags += "-DSK_DIRECT3D"
+                flags += "-DSK_ANGLE"
+            }
+            flags
+        }
         OS.Linux -> listOf(
             "-DSK_BUILD_FOR_LINUX",
             "-D_GLIBCXX_USE_CXX11_ABI=0"

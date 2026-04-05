@@ -46,9 +46,13 @@ fun SkikoProjectContext.declareSkiaTasks() {
 
             val skiaReleaseTag = project.skiaVersion(target)
 
-            val skiaBaseUrl = "https://github.com/JetBrains/skia/releases/download/$skiaReleaseTag"
+            val skiaGithubRepo = project.findProperty("skia.github.repo") as? String ?: "JetBrains/skia"
+            // When building native-only (mingwX64), windows-x64 needs the mingw Skia artifact
+            val isNativeOnly = project.supportNativeWindows && !project.supportAwt
+            val skiaArtifactConfig = if (config == "windows" && isNativeOnly) "mingw" else config
+            val skiaBaseUrl = "https://github.com/$skiaGithubRepo/releases/download/$skiaReleaseTag"
 
-            val artifactId = "Skia-${skiaReleaseTag}-${config}-$buildType-${arch}"
+            val artifactId = "Skia-${skiaReleaseTag}-${skiaArtifactConfig}-$buildType-${arch}"
 
             val downloadSkiaTask = project.tasks.register<Download>("downloadSkia$buildType$taskNameSuffix") {
                 group = "Skia Binaries"
@@ -59,7 +63,7 @@ fun SkikoProjectContext.declareSkiaTasks() {
                 onlyIfModified(true)
                 src(skiaUrl)
                 dest(skiko.dependenciesDir.resolve(
-                    "skia/$skiaReleaseTag/Skia-$skiaReleaseTag-$config-$buildType-${arch}.zip")
+                    "skia/$skiaReleaseTag/$artifactId.zip")
                 )
             }
 
@@ -154,8 +158,11 @@ val Project.supportNativeMac: Boolean
 val Project.supportNativeLinux: Boolean
     get() = supportAllNative || findProperty(SkikoGradleProperties.NATIVE_LINUX) == "true" || isInIdea
 
+val Project.supportNativeWindows: Boolean
+    get() = supportAllNative || findProperty(SkikoGradleProperties.NATIVE_WINDOWS) == "true" || isInIdea
+
 val Project.supportAnyNative: Boolean
-    get() = supportAllNative || supportAnyNativeIos || supportNativeMac || supportNativeLinux
+    get() = supportAllNative || supportAnyNativeIos || supportNativeMac || supportNativeLinux || supportNativeWindows
 
 val Project.supportWeb: Boolean
     get() = findProperty(SkikoGradleProperties.WASM_ENABLED) == "true" || isInIdea

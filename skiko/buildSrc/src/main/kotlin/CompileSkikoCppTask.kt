@@ -105,7 +105,7 @@ abstract class CompileSkikoCppTask() : AbstractSkikoNativeToolTask() {
     private val compilerArgsRootDir = taskStateDir.map { it.dir("args") }
 
     override fun createArgBuilder(): ArgBuilder =
-        if (buildTargetOS.get().isWindows) VisualCppCompilerArgBuilder()
+        if (buildTargetOS.get().isWindows && compiler.get().contains("cl")) VisualCppCompilerArgBuilder()
         else super.createArgBuilder()
 
     override fun execute(mode: ToolMode, args: ArgBuilder) {

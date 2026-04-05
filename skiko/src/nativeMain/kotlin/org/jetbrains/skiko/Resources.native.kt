@@ -6,19 +6,19 @@ import kotlinx.cinterop.usePinned
 import platform.posix.*
 
 actual suspend fun loadBytesFromPath(path: String): ByteArray {
-    val file = fopen(path, "r") ?: run {
+    val file = fopen(path, "rb") ?: run {
         val error = strerror(errno)?.toKString() ?: "Unknown error"
         throw Error("Can not open file '$path': $error")
     }
 
-    val size = file.let {
+    val size: Long = file.let {
         fseek(it, 0, SEEK_END)
-        val size = ftell(it)
+        val size = ftell(it).toLong()
         fseek(it, 0, SEEK_SET)
         size
     }
 
-    if (size < 0) {
+    if (size < 0L) {
         fclose(file)
         throw Error("Can not read file '$path'")
     }

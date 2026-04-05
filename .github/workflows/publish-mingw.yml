@@ -1,0 +1,47 @@
+name: Publish mingwX64
+
+on:
+  workflow_dispatch:
+    inputs:
+      skiko_version:
+        description: "Skiko version to publish"
+        required: false
+        default: "0.144.5"
+
+jobs:
+  publish-mingw:
+    name: "Publish Skiko mingwX64"
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: "corretto"
+
+      - uses: ./.github/actions/setup-prerequisites
+
+      - name: Setup w64devkit (GCC for MinGW)
+        shell: bash
+        run: |
+          curl -L -o w64devkit.7z.exe https://github.com/skeeto/w64devkit/releases/download/v2.6.0/w64devkit-x64-2.6.0.7z.exe
+          7z x w64devkit.7z.exe -oC:/ -y
+
+      - shell: bash
+        run: |
+          export PATH="C:/w64devkit/bin:$PATH"
+          ./gradlew --no-daemon --stacktrace \
+            -Pskiko.native.windows.enabled=true \
+            -Pskiko.awt.enabled=false \
+            -Pskia.github.repo=YuKongA/skia \
+            -Pdeploy.version=${{ github.event.inputs.skiko_version }} \
+            -Pdeploy.release=true \
+            :skiko:publishMingwX64PublicationToMavenLocal \
+            :skiko:publishKotlinMultiplatformPublicationToMavenLocal
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: skiko-mingwx64-${{ github.event.inputs.skiko_version }}
+          path: ~/.m2/repository/org/jetbrains/skiko/
+          retention-days: 30

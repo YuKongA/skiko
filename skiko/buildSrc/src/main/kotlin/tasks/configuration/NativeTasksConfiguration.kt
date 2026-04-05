@@ -149,16 +149,39 @@ fun SkikoProjectContext.compileNativeBridgesTask(
                 }
                 flags.set(linuxFlags)
             }
+            OS.Windows -> {
+                compiler.set("g++.exe")
+                // Filter out clang-specific SK_TRIVIAL_ABI attribute, define it as empty for g++
+                val gccCompatFlags = buildType.clangFlags
+                    .filter { !it.contains("SK_TRIVIAL_ABI") }
+                    .toTypedArray()
+                flags.set(listOf(
+                    *gccCompatFlags,
+                    "-DSK_TRIVIAL_ABI=",
+                    "-fno-rtti",
+                    "-fno-exceptions",
+                    "-fvisibility=hidden",
+                    "-fvisibility-inlines-hidden",
+                    *skiaPreprocessorFlags(OS.Windows, buildType, isNative = true),
+                ))
+            }
             else -> throw GradleException("$os not yet supported")
         }
 
-        val srcDirs = projectDirs("src/commonMain/cpp/common", "src/nativeNativeJs/cpp", "src/nativeJsMain/cpp") +
+        var srcDirs = projectDirs("src/commonMain/cpp/common", "src/nativeNativeJs/cpp", "src/nativeJsMain/cpp") +
                 if (skiko.includeTestHelpers) projectDirs("src/nativeJsTest/cpp") else emptyList()
+        if (os == OS.Windows) {
+            srcDirs = srcDirs + projectDirs("src/mingwMain/cpp")
+        }
         sourceRoots.set(srcDirs)
 
         includeHeadersNonRecursive(projectDir.resolve("src/nativeJsMain/cpp"))
         includeHeadersNonRecursive(projectDir.resolve("src/commonMain/cpp/common/include"))
         includeHeadersNonRecursive(skiaHeadersDirs(unpackedSkia))
+        if (os == OS.Windows) {
+            // ANGLE EGL headers from Skia's bundled third_party
+            includeHeadersNonRecursive(unpackedSkia.resolve("third_party/externals/angle2/include"))
+        }
     }
 }
 
@@ -170,11 +193,15 @@ fun configureCinterop(
     target: KotlinNativeTarget,
     targetString: String,
     linkerOpts: List<String>,
+    staticLibraries: List<String> = emptyList(),
+    libraryPaths: List<String> = emptyList(),
 ) {
     val tasks = target.project.tasks
     val taskNameSuffix = joinToTitleCamelCase(os.idWithSuffix(isUikitSim = target.isUikitSimulator()), arch.id)
     val writeCInteropDef = tasks.register("writeCInteropDef$taskNameSuffix", WriteCInteropDefFile::class.java) {
         this.linkerOpts.set(linkerOpts)
+        this.staticLibraries.set(staticLibraries)
+        this.libraryPaths.set(libraryPaths)
         outputFile.set(project.layout.buildDirectory.file("cinterop/$targetString/skiko.def"))
     }
     tasks.withType(CInteropProcess::class.java).configureEach {
@@ -189,9 +216,9 @@ fun configureCinterop(
     }
 }
 
-fun skiaStaticLibraries(skiaDir: String, targetString: String, buildType: SkiaBuildType): List<String> {
+fun skiaStaticLibraries(skiaDir: String, targetString: String, buildType: SkiaBuildType, os: OS = OS.Linux): List<String> {
     val skiaBinSubdir = "$skiaDir/out/${buildType.id}-$targetString"
-    return listOf(
+    val commonLibs = listOf(
         "libskresources.a",
         "libskparagraph.a",
         "libskia.a",
@@ -205,16 +232,19 @@ fun skiaStaticLibraries(skiaDir: String, targetString: String, buildType: SkiaBu
         "libskunicode_core.a",
         "libskunicode_icu.a",
         "libwebp.a",
-        "libdng_sdk.a",
-        "libpiex.a",
         "libharfbuzz.a",
         "libexpat.a",
         "libzlib.a",
         "libjpeg.a",
-        "libskshaper.a"
-    ).map {
-        "$skiaBinSubdir/$it"
+        "libskshaper.a",
+    )
+    val platformLibs = if (!os.isWindows) {
+        // piex/dng_sdk are not used on Windows
+        listOf("libdng_sdk.a", "libpiex.a")
+    } else {
+        emptyList()
     }
+    return (commonLibs + platformLibs).map { "$skiaBinSubdir/$it" }
 }
 
 fun SkikoProjectContext.configureNativeTarget(os: OS, arch: Arch, target: KotlinNativeTarget) = with(this.project) {
@@ -224,6 +254,8 @@ fun SkikoProjectContext.configureNativeTarget(os: OS, arch: Arch, target: Kotlin
     val isUikitSim = target.isUikitSimulator()
 
     val targetString = "${os.idWithSuffix(isUikitSim = isUikitSim)}-${arch.id}"
+    // Skia's mingw build uses target_os="mingw", so the output dir is "mingw-x64" not "windows-x64"
+    val skiaTargetString = if (os == OS.Windows) "mingw-${arch.id}" else targetString
 
     val unzipper = registerOrGetSkiaDirProvider(os, arch, isUikitSim)
     val unpackedSkia = unzipper.get()
@@ -231,9 +263,13 @@ fun SkikoProjectContext.configureNativeTarget(os: OS, arch: Arch, target: Kotlin
 
     val bridgesLibrary = layout.buildDirectory.file("nativeBridges/static/$targetString/skiko-native-bridges-$targetString.a")
     val bridgesLibraryPath = bridgesLibrary.get().asFile.absolutePath
-    val allLibraries = skiaStaticLibraries(skiaDir, targetString, buildType) + bridgesLibraryPath
+    val compatLibraries = if (os == OS.Windows) listOf(
+        project.file("src/mingwMain/cpp/libstdc++_subset.a").absolutePath,
+        project.file("src/mingwMain/cpp/libmingw_compat.a").absolutePath,
+    ) else emptyList()
+    val allLibraries = skiaStaticLibraries(skiaDir, skiaTargetString, buildType, os) + bridgesLibraryPath + compatLibraries
 
-    val skiaBinDir = "$skiaDir/out/${buildType.id}-$targetString"
+    val skiaBinDir = "$skiaDir/out/${buildType.id}-$skiaTargetString"
     val linkerFlags = when (os) {
         OS.MacOS -> {
             val macFrameworks = listOfFrameworks("Metal", "CoreGraphics", "CoreText", "CoreServices")
@@ -279,6 +315,33 @@ fun SkikoProjectContext.configureNativeTarget(os: OS, arch: Arch, target: Kotlin
                 options.add(1, "-L/opt/arm-gnu-toolchain/aarch64-none-linux-gnu/libc/usr/lib64")
             }
             mutableListOfLinkerOptions(options)
+        }
+        OS.Windows -> {
+            // System libraries needed by Skia on Windows — embedded into klib via cinterop
+            // so consumers inherit them automatically.
+            val windowsLinkerOpts = listOf(
+                "-lopengl32", "-lgdi32", "-luser32",
+                "-lole32", "-loleaut32", "-ldwrite",
+                "-ld2d1", "-lwindowscodecs", "-lusp10", "-luuid",
+                "-Wl,--allow-multiple-definition",
+            )
+            configureCinterop("skiko", os, arch, target, targetString, windowsLinkerOpts)
+
+            val options = mutableListOf<String>()
+            options.addAll(windowsLinkerOpts.flatMap { listOf("-linker-option", it) })
+            // Skia static libraries — embedded via -include-binary through allLibraries.
+            // GCC compat libs (libstdc++_subset.a, libmingw_compat.a) are also in
+            // allLibraries and embedded the same way.
+            options.addAll(mutableListOfLinkerOptions(mutableListOf(
+                "$skiaBinDir/libskottie.a",
+                "$skiaBinDir/libjsonreader.a",
+                "$skiaBinDir/libsksg.a",
+                "$skiaBinDir/libskshaper.a",
+                "$skiaBinDir/libskunicode_core.a",
+                "$skiaBinDir/libskunicode_icu.a",
+                "$skiaBinDir/libskia.a",
+            )))
+            options
         }
         else -> mutableListOf()
     }
@@ -328,6 +391,10 @@ fun SkikoProjectContext.configureNativeTarget(os: OS, arch: Arch, target: Kotlin
             OS.MacOS, OS.IOS, OS.TVOS -> {
                 executable = "libtool"
                 argumentProviders.add { listOf("-static", "-o", staticLib) }
+            }
+            OS.Windows -> {
+                executable = "ar"
+                argumentProviders.add { listOf("-crs", staticLib) }
             }
             else -> error("Unexpected OS for native bridges linking: $os")
         }
